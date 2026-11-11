@@ -1,0 +1,564 @@
+﻿@page "/inventario"
+@using SistemaVisitas.Client.Services
+@using SistemaVisitas.Shared.DTOs
+@using Microsoft.AspNetCore.Authorization
+@using System.Text.Json
+@attribute [Authorize] 
+@inject DispositivosService DispositivosService
+@inject TiposDispositivosService TiposService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject EmpresasService EmpresasService
+
+<PageTitle>Inventario de Equipos</PageTitle>
+
+<div class="container-fluid mt-4 fade-in">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold text-primary-dark">
+            <i class="bi bi-pc-display me-2"></i>Inventario Físico de Equipos
+        </h2>
+    </div>
+
+    <div class="row">
+        <!-- ========================================================== -->
+        <!-- TABLA DE EQUIPOS REGISTRADOS (Visible para TODOS)          -->
+        <!-- ========================================================== -->
+        <div class="col-lg-7 mb-4">
+            <div class="card shadow-sm border-0 rounded-3">
+                <div class="card-header bg-white border-bottom-0 pt-4 pb-2">
+                    <h5 class="fw-bold text-muted">Equipos en Inventario</h5>
+                </div>
+                <div class="card-body">
+                    @if (isLoading)
+                    {
+                        <div class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <div class="mt-2 text-muted small">Cargando inventario...</div>
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(errorCarga))
+                    {
+                        <div class="alert alert-danger border-0 shadow-sm"><i class="bi bi-exclamation-triangle-fill me-2"></i>@errorCarga</div>
+                    }
+                    else if (!dispositivos.Any())
+                    {
+                        <div class="alert alert-info border-0 shadow-sm"><i class="bi bi-info-circle-fill me-2"></i>No hay equipos registrados para mostrar.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle custom-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Marca y Modelo</th> 
+                                        <th>N° Serie</th>
+                                        <th>Tipo (Molde)</th>
+                                        <th class="text-center">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var equipo in dispositivos)
+                                    {
+                                        <tr>
+                                            <td><span class="badge bg-secondary">#@equipo.Id</span></td>
+                                            <td class="fw-semibold">@equipo.Marca @equipo.Modelo</td>
+                                            <td><small class="text-muted">@(string.IsNullOrEmpty(equipo.NumeroSerie) ? "N/A" : equipo.NumeroSerie)</small></td>
+                                            <td><span class="badge bg-info text-dark">@(equipo.Tipo ?? "Desconocido")</span></td>
+                                            
+                                            <td class="text-center">
+                                                <!-- Botón Detalles: Visible para TODOS -->
+                                                <button class="btn btn-sm btn-outline-info me-1" @onclick="() => VerDetalles(equipo)" title="Ver Detalles">
+                                                    <i class="bi bi-eye"></i>
+                                                </button>
+
+                                                <!-- Botones de Edición: Ocultos para Empresa/Cliente -->
+                                                <AuthorizeView Roles="Admin, Trabajador" Context="btnContext">
+                                                    <Authorized>
+                                                        <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => EditarEquipo(equipo)" title="Editar">
+                                                            <i class="bi bi-pencil"></i>
+                                                        </button>
+                                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => EliminarEquipo(equipo.Id)" title="Eliminar">
+                                                            <i class="bi bi-trash3"></i>
+                                                        </button>
+                                                    </Authorized>
+                                                </AuthorizeView>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================================== -->
+        <!-- FORMULARIO DE CREACIÓN/EDICIÓN (Oculto para Clientes)      -->
+        <!-- ========================================================== -->
+        <AuthorizeView Roles="Admin, Trabajador">
+            <Authorized Context="authContext">
+                <div class="col-lg-5">
+                    <div class="card shadow-sm border-0 rounded-3 form-card">
+                        <div class="card-body p-4">
+                            <h5 class="fw-bold text-primary-dark mb-4">
+                                <i class="@((nuevoEquipo.Id == 0) ? "bi bi-plus-circle" : "bi bi-pencil-square") me-2"></i>
+                                @((nuevoEquipo.Id == 0) ? "Registrar Nuevo Equipo" : $"Editando Equipo #{nuevoEquipo.Id}")
+                            </h5>
+
+                            @if (!string.IsNullOrEmpty(mensajeError))
+                            {
+                                <div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-2"></i>@mensajeError</div>
+                            }
+                            @if (mostrarExito)
+                            {
+                                <div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i>Equipo guardado correctamente.</div>
+                            }
+
+                            <EditForm Model="nuevoEquipo" OnValidSubmit="GuardarEquipo">
+                                <DataAnnotationsValidator />
+
+                                <!-- BLOQUE 1: Asignación (Solo Admin) -->
+                                @if (esAdmin)
+                                {
+                                    <div class="mb-4 p-3 bg-light border rounded">
+                                        <label class="form-label fw-bold text-danger"><i class="bi bi-building-lock me-2"></i>Asignar a Cliente (Empresa)</label>
+                                        <select class="form-select border-danger" @bind="nuevoEquipo.EmpresaId">
+                                            <option value="0">-- Selecciona la empresa dueña --</option>
+                                            @foreach (var emp in listaEmpresas)
+                                            {
+                                                <option value="@emp.Id">@emp.Nombre</option>
+                                            }
+                                        </select>
+                                        <ValidationMessage For="@(() => nuevoEquipo.EmpresaId)" class="text-danger small" />
+                                    </div>
+                                }
+
+                                <!-- BLOQUE 2: Tipo de Equipo (Desencadena el formulario dinámico) -->
+                                <div class="mb-4">
+                                    <label class="form-label fw-bold text-primary-dark">Tipo de Equipo (Molde) *</label>
+                                    <select class="form-select border-primary shadow-sm" value="@nuevoEquipo.TipoDispositivoId" @onchange="OnTipoSeleccionado">
+                                        <option value="0">-- Selecciona un tipo --</option>
+                                        @foreach (var tipo in tiposDisponibles)
+                                        {
+                                            <option value="@tipo.Id">@tipo.Nombre</option>
+                                        }
+                                    </select>
+                                    <ValidationMessage For="@(() => nuevoEquipo.TipoDispositivoId)" class="text-danger small" />
+                                </div>
+
+                                <!-- BLOQUE 3: Hardware (Marca y Modelo) -->
+                                <div class="row g-3 mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold text-muted">Marca *</label>
+                                        <InputText class="form-control bg-light" @bind-Value="nuevoEquipo.Marca" placeholder="Ej: Cisco, HP, Lenovo" />
+                                        <ValidationMessage For="@(() => nuevoEquipo.Marca)" class="text-danger small" />
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold text-muted">Modelo *</label>
+                                        <InputText class="form-control bg-light" @bind-Value="nuevoEquipo.Modelo" placeholder="Ej: Catalyst 2960" />
+                                        <ValidationMessage For="@(() => nuevoEquipo.Modelo)" class="text-danger small" />
+                                    </div>
+                                </div>
+
+                                <!-- BLOQUE 4: Identificadores Únicos -->
+                                <div class="row g-3 mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold text-muted">Código de Activo</label>
+                                        <InputText class="form-control bg-light" @bind-Value="nuevoEquipo.CodigoActivo" placeholder="Ej: INV-001" />
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold text-muted">Número de Serie</label>
+                                        <InputText class="form-control bg-light" @bind-Value="nuevoEquipo.NumeroSerie" placeholder="S/N..." />
+                                    </div>
+                                </div>
+
+                                <!-- BLOQUE 5: Ubicación y Estado -->
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold text-muted">Ubicación Física</label>
+                                        <InputText class="form-control bg-light" @bind-Value="nuevoEquipo.Ubicacion" placeholder="Ej: Rack 2, Piso 4" />
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold text-muted">Estado</label>
+                                        <select class="form-select bg-light" @bind="nuevoEquipo.Estado">
+                                            <option value="Activo">Activo</option>
+                                            <option value="En Reparación">En Reparación</option>
+                                            <option value="Inactivo">Inactivo</option>
+                                            <option value="De Baja">De Baja</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- ZONA DE MAGIA: Renderizado Dinámico -->
+                                @if (esquemaActual != null && esquemaActual.Any())
+                                {
+                                    <div class="p-3 border rounded bg-white shadow-sm mb-4">
+                                        <h6 class="fw-bold text-primary-dark mb-3"><i class="bi bi-magic me-2"></i>Atributos Específicos</h6>
+                                        
+                                        @foreach (var campo in esquemaActual)
+                                        {
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold text-muted small">
+                                                    @campo.NombreCampo
+                                                    @if (campo.Requerido) { <span class="text-danger ms-1">*</span> }
+                                                </label>
+                                                <input type="@GetHtmlInputType(campo.TipoDato)" 
+                                                       class="form-control form-control-sm" 
+                                                       @bind="valoresDinamicos[campo.NombreCampo]" 
+                                                       placeholder="Ingresar @campo.NombreCampo..." />
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary flex-grow-1 py-2 fw-bold" disabled="@isSaving">
+                                        @if (isSaving)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-2"></span> <span>Procesando...</span>
+                                        }
+                                        else
+                                        {
+                                            <span>@((nuevoEquipo.Id == 0) ? "Registrar Equipo" : "Actualizar Equipo")</span>
+                                        }
+                                    </button>
+                                    
+                                    @if (nuevoEquipo.Id != 0)
+                                    {
+                                        <button type="button" class="btn btn-secondary py-2" @onclick="LimpiarFormulario">Cancelar</button>
+                                    }
+                                </div>
+                            </EditForm>
+                        </div>
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+</div>
+
+<!-- ========================================================== -->
+<!-- MODAL DE DETALLES DEL EQUIPO                               -->
+<!-- ========================================================== -->
+@if (mostrarModalDetalles && equipoSeleccionado != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content shadow-lg border-0">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-pc-display-horizontal me-2"></i>Detalles del Equipo</h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CerrarDetalles"></button>
+                </div>
+                <div class="modal-body p-4 bg-light">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <p class="mb-1 text-muted small">Marca y Modelo</p>
+                            <h6 class="fw-bold text-dark">@equipoSeleccionado.Marca @equipoSeleccionado.Modelo</h6>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-1 text-muted small">Estado Actual</p>
+                            <span class="badge @(equipoSeleccionado.Estado == "Activo" ? "bg-success" : "bg-warning text-dark")">
+                                @equipoSeleccionado.Estado
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <p class="mb-1 text-muted small">Tipo (Molde)</p>
+                            <p class="fw-semibold">@(equipoSeleccionado.Tipo ?? "Desconocido")</p>
+                        </div>
+                        <div class="col-md-4">
+                            <p class="mb-1 text-muted small">N° de Serie</p>
+                            <p class="fw-semibold">@(string.IsNullOrEmpty(equipoSeleccionado.NumeroSerie) ? "N/A" : equipoSeleccionado.NumeroSerie)</p>
+                        </div>
+                        <div class="col-md-4">
+                            <p class="mb-1 text-muted small">Ubicación</p>
+                            <p class="fw-semibold">@(string.IsNullOrEmpty(equipoSeleccionado.Ubicacion) ? "No especificada" : equipoSeleccionado.Ubicacion)</p>
+                        </div>
+                    </div>
+
+                    @if (detallesDinamicosVista.Any())
+                    {
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-white border-bottom-0 pt-3">
+                                <h6 class="fw-bold text-primary mb-0"><i class="bi bi-info-square me-2"></i>Especificaciones Técnicas</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    @foreach (var detalle in detallesDinamicosVista)
+                                    {
+                                        <div class="col-md-6 mb-2">
+                                            <span class="text-muted small">@detalle.Key:</span> 
+                                            <span class="fw-semibold ms-1">@(string.IsNullOrEmpty(detalle.Value) ? "-" : detalle.Value)</span>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer border-0 bg-light">
+                    <button type="button" class="btn btn-secondary fw-bold" @onclick="CerrarDetalles">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DispositivoDto> dispositivos = new();
+    private List<TipoDispositivoDto> tiposDisponibles = new();
+    private DispositivoDto nuevoEquipo = new();
+    private bool esAdmin = false;
+    private bool esTrabajador = false; // Agregamos esta variable
+    private List<EmpresaDto> listaEmpresas = new();
+    private string errorCarga = "";
+    
+    // Variables para el motor dinámico
+    private List<CampoEsquema>? esquemaActual;
+    private Dictionary<string, string> valoresDinamicos = new();
+
+    // Variables para el Modal de Detalles
+    private bool mostrarModalDetalles = false;
+    private DispositivoDto? equipoSeleccionado;
+    private Dictionary<string, string> detallesDinamicosVista = new();
+
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private string? mensajeError;
+    private bool mostrarExito = false;
+
+    public class CampoEsquema
+    {
+        public string NombreCampo { get; set; } = "";
+        public string TipoDato { get; set; } = "texto";
+        public bool Requerido { get; set; } = false;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        esAdmin = authState.User.IsInRole("Admin");
+        esTrabajador = authState.User.IsInRole("Trabajador");
+
+        await CargarDatos();
+    }
+
+    private async Task CargarDatos()
+    {
+        try
+        {
+            isLoading = true;
+            errorCarga = "";
+            
+            // TODOS (Admin, Trabajador, Empresa) cargan sus equipos
+            dispositivos = await DispositivosService.GetDispositivosAsync();
+            
+            // SOLO Admin y Trabajador (los que pueden crear/editar) descargan los Tipos y Empresas
+            if (esAdmin || esTrabajador)
+            {
+                tiposDisponibles = await TiposService.GetTiposAsync();
+                if (esAdmin)
+                {
+                    listaEmpresas = await EmpresasService.GetEmpresasAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            errorCarga = $"No se pudo cargar el inventario: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private string GetNombreTipo(int id)
+    {
+        // Como la "Empresa" ya no descarga tiposDisponibles, este método no le sirve.
+        // Ahora lo usará solo el formulario de edición.
+        var tipo = tiposDisponibles.FirstOrDefault(t => t.Id == id);
+        return tipo != null ? tipo.Nombre : "Desconocido";
+    }
+
+    private string GetHtmlInputType(string tipoDato)
+    {
+        return tipoDato switch
+        {
+            "numero" => "number",
+            "fecha" => "date",
+            _ => "text"
+        };
+    }
+
+    private void OnTipoSeleccionado(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int idSeleccionado) && idSeleccionado > 0)
+        {
+            nuevoEquipo.TipoDispositivoId = idSeleccionado;
+            CargarEsquemaEnVista(idSeleccionado);
+            
+            valoresDinamicos.Clear();
+            foreach (var campo in esquemaActual!)
+            {
+                valoresDinamicos[campo.NombreCampo] = "";
+            }
+        }
+        else
+        {
+            nuevoEquipo.TipoDispositivoId = 0;
+            esquemaActual = null;
+            valoresDinamicos.Clear();
+        }
+    }
+
+    private void CargarEsquemaEnVista(int tipoId)
+    {
+        var tipo = tiposDisponibles.FirstOrDefault(t => t.Id == tipoId);
+        if (tipo != null && !string.IsNullOrWhiteSpace(tipo.EsquemaMolde))
+        {
+            var opciones = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            esquemaActual = JsonSerializer.Deserialize<List<CampoEsquema>>(tipo.EsquemaMolde, opciones) ?? new();
+        }
+        else
+        {
+            esquemaActual = new();
+        }
+    }
+
+    // ==========================================
+    // METODOS DEL MODAL DE DETALLES
+    // ==========================================
+    private void VerDetalles(DispositivoDto equipo)
+    {
+        equipoSeleccionado = equipo;
+        
+        try
+        {
+            if (!string.IsNullOrEmpty(equipo.DetallesTecnicos) && equipo.DetallesTecnicos != "{}")
+            {
+                detallesDinamicosVista = JsonSerializer.Deserialize<Dictionary<string, string>>(equipo.DetallesTecnicos) ?? new();
+            }
+            else
+            {
+                detallesDinamicosVista = new Dictionary<string, string>();
+            }
+        }
+        catch
+        {
+            detallesDinamicosVista = new Dictionary<string, string>();
+        }
+
+        mostrarModalDetalles = true;
+    }
+
+    private void CerrarDetalles()
+    {
+        mostrarModalDetalles = false;
+        equipoSeleccionado = null;
+        detallesDinamicosVista.Clear();
+    }
+
+    // ==========================================
+    // METODOS DE EDICIÓN Y GUARDADO
+    // ==========================================
+    private void EditarEquipo(DispositivoDto equipo)
+    {
+        mensajeError = null;
+        mostrarExito = false;
+        
+        nuevoEquipo = new DispositivoDto 
+        { 
+            Id = equipo.Id, 
+            Nombre = equipo.Nombre, 
+            CodigoActivo = equipo.CodigoActivo,
+            NumeroSerie = equipo.NumeroSerie,
+            Marca = equipo.Marca,
+            Modelo = equipo.Modelo,
+            Ubicacion = equipo.Ubicacion,
+            Estado = equipo.Estado ?? "Activo",
+            TipoDispositivoId = equipo.TipoDispositivoId,
+            EmpresaId = equipo.EmpresaId,
+            DetallesTecnicos = equipo.DetallesTecnicos
+        };
+
+        CargarEsquemaEnVista(equipo.TipoDispositivoId);
+
+        try
+        {
+            var diccionarioGuardado = JsonSerializer.Deserialize<Dictionary<string, string>>(equipo.DetallesTecnicos ?? "{}");
+            valoresDinamicos = diccionarioGuardado ?? new Dictionary<string, string>();
+            
+            foreach (var campo in esquemaActual!)
+            {
+                if (!valoresDinamicos.ContainsKey(campo.NombreCampo))
+                {
+                    valoresDinamicos[campo.NombreCampo] = "";
+                }
+            }
+        }
+        catch
+        {
+            valoresDinamicos = new Dictionary<string, string>();
+        }
+    }
+
+    private void LimpiarFormulario()
+    {
+        nuevoEquipo = new DispositivoDto { Estado = "Activo" }; 
+        esquemaActual = null;
+        valoresDinamicos = new Dictionary<string, string>(); 
+        mensajeError = null;
+    }
+
+    private async Task GuardarEquipo()
+    {
+        isSaving = true;
+        mensajeError = null;
+        mostrarExito = false;
+
+        if (nuevoEquipo.TipoDispositivoId <= 0)
+        {
+            mensajeError = "Debes seleccionar un Tipo de Equipo.";
+            isSaving = false;
+            return;
+        }
+
+        var nombreTipo = GetNombreTipo(nuevoEquipo.TipoDispositivoId);
+        nuevoEquipo.Nombre = $"{nombreTipo} {nuevoEquipo.Marca} {nuevoEquipo.Modelo}".Trim();
+        nuevoEquipo.DetallesTecnicos = JsonSerializer.Serialize(valoresDinamicos);
+
+        HttpResponseMessage response;
+        if (nuevoEquipo.Id == 0)
+        {
+            response = await DispositivosService.CrearDispositivoAsync(nuevoEquipo);
+        }
+        else
+        {
+            response = await DispositivosService.ActualizarDispositivoAsync(nuevoEquipo);
+        }
+
+        if (response.IsSuccessStatusCode)
+        {
+            mostrarExito = true;
+            LimpiarFormulario();
+            // IMPORTANTE: Recargamos los datos para que el equipo nuevo aparezca en la lista
+            await CargarDatos(); 
+        }
+        else
+        {
+            var errorText = await response.Content.ReadAsStringAsync();
+            mensajeError = $"Error del servidor: {errorText}";
+        }
+        isSaving = false;
+    }
+
+    private async Task EliminarEquipo(int id)
+    {
+        var exito = await DispositivosService.EliminarDispositivoAsync(id);
+        if (exito) await CargarDatos();
+    }
+}

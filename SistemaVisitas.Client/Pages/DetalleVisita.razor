@@ -1,0 +1,212 @@
+﻿@page "/detalle-visita/{Id:int}"
+@using SistemaVisitas.Client.Services
+@using SistemaVisitas.Shared.DTOs
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject HojasVisitaService VisitaService
+@inject NavigationManager NavManager
+@inject IJSRuntime JS
+
+<PageTitle>Acta de Visita Técnica - Tecnoware Solutions</PageTitle>
+
+<div class="container mt-4 mb-5 fade-in">
+    <!-- Botones de Acción (Se ocultan al imprimir) -->
+    <div class="d-flex justify-content-between mb-4 d-print-none">
+        <button class="btn btn-outline-secondary shadow-sm" @onclick='() => NavManager.NavigateTo("historial-visitas")'>
+            <i class="bi bi-arrow-left me-1"></i> Volver al Historial
+        </button>
+        <button class="btn btn-primary shadow-sm" @onclick="ImprimirActa">
+            <i class="bi bi-printer me-1"></i> Imprimir / Guardar PDF
+        </button>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div></div>
+    }
+    else if (acta == null)
+    {
+        <div class="alert alert-danger shadow-sm">No se encontró el acta o no tienes permisos para verla.</div>
+    }
+    else
+    {
+        <!-- DOCUMENTO DEL ACTA -->
+        <div class="card shadow-lg border-0 rounded-0" id="acta-documento">
+            
+            <!-- ENCABEZADO -->
+            <div class="card-header bg-white p-4 border-bottom border-dark d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="fw-black mb-0" style="color: #0b2b5e;">TECNO<span class="text-primary">WARE</span></h2>
+                    <p class="text-muted mb-0" style="font-size: 0.9rem;">Soluciones Tecnológicas e Inventario</p>
+                </div>
+                <div class="text-end">
+                    <h4 class="fw-bold text-dark mb-0">ACTA DE SERVICIO TÉCNICO</h4>
+                    <span class="fs-5 text-secondary">N° @acta.Consecutivo</span>
+                </div>
+            </div>
+
+            <div class="card-body p-5 bg-white text-dark">
+                
+                <!-- INFORMACIÓN GENERAL -->
+                <div class="row border-bottom pb-4 mb-4">
+                    <div class="col-md-6 mb-3 mb-md-0">
+                        <h6 class="text-uppercase fw-bold text-muted mb-3">Información del Cliente</h6>
+                        <p class="mb-1"><strong>Empresa:</strong> @acta.EmpresaNombre</p>
+                        <p class="mb-1"><strong>Recibe:</strong> @acta.NombreQuienRecibe</p>
+                        <p class="mb-1"><strong>Cargo:</strong> @(string.IsNullOrEmpty(acta.CargoQuienRecibe) ? "N/A" : acta.CargoQuienRecibe)</p>
+                    </div>
+                    <div class="col-md-6 border-start ps-md-4">
+                        <h6 class="text-uppercase fw-bold text-muted mb-3">Detalles de la Visita</h6>
+                        <p class="mb-1"><strong>Técnico:</strong> @acta.TecnicoNombre</p>
+                        <p class="mb-1"><strong>Tipo de Revisión:</strong> @acta.PlantillaNombre</p>
+                        <p class="mb-1"><strong>Fecha de Inicio:</strong> @acta.FechaInicio.ToString("dd/MM/yyyy hh:mm tt")</p>
+                        <p class="mb-1"><strong>Fecha de Cierre:</strong> @(acta.FechaFin?.ToString("dd/MM/yyyy hh:mm tt") ?? "En proceso")</p>
+                        
+                        @if(acta.FechaFin.HasValue)
+                        {
+                            var duracion = acta.FechaFin.Value - acta.FechaInicio;
+                            <p class="mb-0 text-primary"><strong>Duración:</strong> @duracion.Hours h @duracion.Minutes min</p>
+                        }
+                    </div>
+                </div>
+
+                <!-- EQUIPOS INTERVENIDOS -->
+                @if (acta.Equipos.Any())
+                {
+                    <div class="mb-4">
+                        <h6 class="text-uppercase fw-bold text-muted border-bottom pb-2">Equipos Intervenidos en esta Visita</h6>
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                            @foreach (var equipo in acta.Equipos)
+                            {
+                                <span class="badge bg-light text-dark border p-2 fs-6"><i class="bi bi-pc-display me-2"></i>@equipo</span>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <!-- PREGUNTAS Y EVIDENCIAS (Agrupadas por sección) -->
+                <div class="mb-5 mt-5">
+                    <h6 class="text-uppercase fw-bold text-muted border-bottom pb-2 mb-4">Resultados de la Inspección</h6>
+                    
+                    @foreach (var grupoSeccion in acta.Respuestas.GroupBy(r => r.Seccion))
+                    {
+                        <div class="mb-4 break-inside-avoid">
+                            <h5 class="fw-bold bg-light p-2 border-start border-primary border-4 text-dark">@grupoSeccion.Key</h5>
+                            <table class="table table-sm table-borderless align-middle mt-3">
+                                <tbody>
+                                    @foreach (var item in grupoSeccion)
+                                    {
+                                        <tr class="border-bottom">
+                                            <td style="width: 55%;" class="py-3 ps-2">@item.Pregunta</td>
+                                            <td style="width: 45%;" class="py-3 pe-2 text-end">
+                                                
+                                                @if (item.TipoCampo == "Imagen" || item.TipoCampo == "Evidencia")
+                                                {
+                                                    if (!string.IsNullOrEmpty(item.Respuesta) && item.Respuesta.StartsWith("http"))
+                                                    {
+                                                        <a href="@item.Respuesta" target="_blank">
+                                                            <!-- La imagen está optimizada para verse bien en pantalla y al imprimir -->
+                                                            <img src="@item.Respuesta" class="img-thumbnail" style="max-height: 200px; max-width: 100%; object-fit: contain;" alt="Evidencia" />
+                                                        </a>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="fst-italic text-muted">Sin evidencia cargada</span>
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    <span class="fw-semibold @(item.Respuesta.Contains("No Cumple") ? "text-danger" : "text-dark")">
+                                                        @item.Respuesta
+                                                    </span>
+                                                }
+
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+
+                <!-- OBSERVACIONES Y FIRMAS -->
+                <div class="mt-5 break-inside-avoid">
+                    @if (!string.IsNullOrEmpty(acta.ObservacionesGenerales))
+                    {
+                        <div class="mb-5 p-3 bg-light rounded border">
+                            <strong>Observaciones Generales:</strong>
+                            <p class="mb-0 mt-2">@acta.ObservacionesGenerales</p>
+                        </div>
+                    }
+
+                    <div class="row mt-5 pt-4 text-center">
+                        <!-- Firma Cliente -->
+                        <div class="col-6">
+                            <div class="border-bottom border-dark mx-auto d-flex justify-content-center align-items-end" style="width: 80%; height: 120px;">
+                                @if (!string.IsNullOrEmpty(acta.FirmaClienteBase64))
+                                {
+                                    <img src="@acta.FirmaClienteBase64" alt="Firma Cliente" style="max-height: 100px; max-width: 100%;" />
+                                }
+                            </div>
+                            <h6 class="mt-2 fw-bold text-uppercase mb-0">@acta.NombreQuienRecibe</h6>
+                            <p class="small text-muted mb-0">@acta.CargoQuienRecibe</p>
+                            <p class="small text-muted">CC: @acta.DocumentoQuienRecibe</p>
+                            <span class="badge bg-secondary">Aceptado a Satisfacción</span>
+                        </div>
+                        
+                        <div class="col-6">                           
+                            <h6 class="mt-2 fw-bold text-uppercase mb-0">@acta.TecnicoNombre</h6>
+                            <p class="small text-muted mb-0">Soporte Técnico</p>
+                            <p class="small text-muted">Tecnoware Solutions</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+            
+            <!-- Pie de página para impresión -->
+            <div class="card-footer bg-white text-center border-top-0 pt-0 pb-4">
+                <small class="text-muted">Este documento es generado automáticamente por el Sistema de Visitas de Tecnoware Solutions.</small>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Estilos CSS específicos para la vista e impresión -->
+<style>
+    /* Aseguramos que la foto y las tablas no se corten por la mitad al cambiar de hoja en el PDF */
+    .break-inside-avoid {
+        page-break-inside: avoid;
+    }
+    
+    @@media print {
+        body { background-color: white !important; }
+        .container { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
+        .card { box-shadow: none !important; border: none !important; }
+        /* Oculta menú lateral y navs de Blazor al imprimir */
+        .sidebar, .top-row { display: none !important; }
+        main { padding: 0 !important; margin: 0 !important; }
+    }
+</style>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private ActaVisitaDto? acta;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        acta = await VisitaService.GetVisitaDetalleAsync(Id);
+        isLoading = false;
+    }
+
+    private async Task ImprimirActa()
+    {
+        // Ejecuta el comando de impresión del navegador
+        await JS.InvokeVoidAsync("window.print");
+    }
+}

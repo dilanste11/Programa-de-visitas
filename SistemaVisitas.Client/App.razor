@@ -1,0 +1,38 @@
+﻿<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+                <Authorizing>
+                    <div class="d-flex flex-column align-items-center justify-content-center min-vh-100" style="background-color: #f8f9fa; position: fixed; width: 100%; z-index: 9999; top: 0; left: 0;">
+                        <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem; border-width: 0.25em;" role="status"></div>
+                        <h5 class="fw-bold text-muted">Verificando acceso...</h5>
+                    </div>
+                </Authorizing>
+                <NotAuthorized>
+                    <!-- PANTALLA CREATIVA CUANDO NO HAY SESIÓN -->
+                    <div class="d-flex align-items-center justify-content-center min-vh-100" style="background-color: #f8f9fa; width: 100vw; position: fixed; top: 0; left: 0; z-index: 9999;">
+                        <div class="text-center p-5 shadow-lg bg-white border-top border-primary border-4" style="max-width: 450px; border-radius: 16px;">
+                            <div class="mb-4">
+                                <i class="bi bi-shield-lock-fill text-primary" style="font-size: 5rem;"></i>
+                            </div>
+                            <h2 class="fw-bold text-dark">Acceso Restringido</h2>
+                            <p class="text-muted my-4" style="font-size: 1.1rem;">
+                                Bienvenido a <strong>Tecnoware Visitas</strong>. Para acceder a este panel, necesitas identificarte.
+                            </p>
+                            <a href="login" class="btn btn-primary btn-lg fw-bold w-100 shadow-sm rounded-pill">
+                                <i class="bi bi-box-arrow-in-right me-2"></i> Iniciar Sesión
+                            </a>
+                        </div>
+                    </div>
+                </NotAuthorized>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <PageTitle>Página no encontrada</PageTitle>
+            <LayoutView Layout="@typeof(MainLayout)">
+                <p role="alert">Lo sentimos, no hay nada en esta dirección.</p>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>

@@ -1,0 +1,122 @@
+﻿@page "/historial-visitas"
+@using SistemaVisitas.Client.Services
+@using SistemaVisitas.Shared.DTOs
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject NavigationManager NavManager
+@inject HojasVisitaService VisitaService
+
+<PageTitle>Historial de Visitas</PageTitle>
+
+<div class="container-fluid mt-4 fade-in mb-5">
+    
+    <!-- TÍTULO DINÁMICO SEGÚN EL ROL -->
+    <AuthorizeView Roles="Admin, Trabajador">
+        <Authorized>
+            <h2 class="fw-bold text-primary-dark mb-4">
+                <i class="bi bi-building-check me-2"></i>Historial General de Visitas
+            </h2>
+        </Authorized>
+    </AuthorizeView>
+    <AuthorizeView Roles="Cliente">
+        <Authorized>
+            <h2 class="fw-bold text-primary-dark mb-4">
+                <i class="bi bi-inboxes me-2"></i>Mis Visitas Recibidas
+            </h2>
+        </Authorized>
+    </AuthorizeView>
+
+    <div class="card shadow-sm border-0 rounded-3">
+        <div class="card-body p-4">
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2 text-muted">Cargando registros...</p>
+                </div>
+            }
+            else if (!visitas.Any())
+            {
+                <div class="alert alert-info border-0 shadow-sm text-center py-4">
+                    <i class="bi bi-info-circle fs-3 d-block mb-2"></i>
+                    No hay visitas registradas para mostrar en este momento.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle border">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Consecutivo</th>
+                                <th>Fecha</th>
+                                
+                                <!-- OCULTAMOS LA COLUMNA EMPRESA SI EL QUE MIRA ES EL CLIENTE -->
+                                <AuthorizeView Roles="Admin, Trabajador">
+                                    <Authorized>
+                                        <th>Cliente / Empresa</th>
+                                    </Authorized>
+                                </AuthorizeView>
+
+                                <th>Tipo de Revisión (Plantilla)</th>
+                                <th>Técnico</th>
+                                <th>Estado</th>
+                                <th class="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var visita in visitas)
+                            {
+                                <tr>
+                                    <td><span class="badge bg-secondary">@visita.Consecutivo</span></td>
+                                    <td>
+                                        <div class="fw-bold">@visita.FechaInicio.ToString("dd-MMM-yyyy")</div>
+                                        <small class="text-muted">@visita.FechaInicio.ToString("hh:mm tt")</small>
+                                    </td>
+                                    
+                                    <AuthorizeView Roles="Admin, Trabajador">
+                                        <Authorized>
+                                            <td class="fw-bold text-primary-dark">@visita.EmpresaNombre</td>
+                                        </Authorized>
+                                    </AuthorizeView>
+
+                                    <td>@visita.PlantillaNombre</td>
+                                    <td><i class="bi bi-person me-1"></i> @visita.TecnicoNombre</td>
+                                    <td>
+                                        @if (visita.Estado == "Finalizada") { <span class="badge bg-success">@visita.Estado</span> }
+                                        else { <span class="badge bg-warning text-dark">@visita.Estado</span> }
+                                    </td>
+                                    <td class="text-center">                                        
+                                        <button class="btn btn-sm btn-outline-primary" title="Ver Acta Completa"
+                                                @onclick="@(() => NavManager.NavigateTo($"/detalle-visita/{visita.Id}"))">
+                                            <i class="bi bi-eye"></i
+                                        </button>
+                                        <AuthorizeView Roles="Admin">
+                                            <Authorized>
+                                                <button class="btn btn-sm btn-outline-danger ms-1" title="Anular Visita">
+                                                    <i class="bi bi-x-circle"></i>
+                                                </button>
+                                            </Authorized>
+                                        </AuthorizeView>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<VisitaResumenDto> visitas = new();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        visitas = await VisitaService.GetHistorialVisitasAsync();
+        isLoading = false;
+    }
+}

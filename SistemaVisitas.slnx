@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="SistemaVisitas.Api/SistemaVisitas.Api.csproj" />
+  <Project Path="SistemaVisitas.Client/SistemaVisitas.Client.csproj" />
+  <Project Path="SistemaVisitas.Shared/SistemaVisitas.Shared.csproj" />
+</Solution>

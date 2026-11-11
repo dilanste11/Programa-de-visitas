@@ -1,0 +1,244 @@
+﻿@page "/gestion-usuarios"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@using SistemaVisitas.Shared.DTOs
+@using SistemaVisitas.Client.Services
+@using System.Net.Http.Json
+@inject UsuariosService UsuariosService
+@inject HttpClient Http
+
+<PageTitle>Gestión de Usuarios - Tecnoware</PageTitle>
+
+<div class="container-fluid mt-4 fade-in">
+    <h3 class="mb-4 fw-bold text-dark">Gestión de Usuarios y Accesos</h3>
+
+    <div class="row">
+        <!-- FORMULARIO LATERAL -->
+        <div class="col-md-4 mb-4">
+            <div class="card shadow-sm border-0">
+                <div class="card-header @(isEditing ? "bg-warning text-dark" : "bg-primary text-white")">
+                    <h5 class="mb-0 fw-bold">
+                        <i class="bi @(isEditing ? "bi-pencil-square" : "bi-person-plus") me-2"></i>
+                        @(isEditing ? "Editar Usuario" : "Nuevo Usuario")
+                    </h5>
+                </div>
+                <div class="card-body bg-light">
+                    <EditForm Model="usuarioForm" OnValidSubmit="GuardarUsuario">
+                        <DataAnnotationsValidator />
+
+                        <div class="mb-3">
+                            <label class="fw-semibold small text-muted">Nombre Completo</label>
+                            <InputText class="form-control" @bind-Value="usuarioForm.NombreCompleto" placeholder="Ej: Dilan Alzate" />
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="fw-semibold small text-muted">Correo Electrónico (Usuario de acceso)</label>
+                            <InputText type="email" class="form-control" @bind-Value="usuarioForm.Correo" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="fw-semibold small text-muted">Contraseña @(isEditing ? "(Opcional)" : "")</label>
+                            <InputText type="password" class="form-control" @bind-Value="passwordTemporal" 
+                                       placeholder="@(isEditing ? "Dejar en blanco para conservar la actual" : "Asigna una contraseña")" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="fw-semibold small text-muted">Rol en el Sistema</label>
+                            <InputSelect class="form-select" @bind-Value="usuarioForm.RolId" @bind-Value:after="VerificarRol">
+                                <option value="0">-- Seleccione el Rol --</option>
+                                @foreach (var rol in listaRoles)
+                                {
+                                    <option value="@rol.Id">@rol.Nombre</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        @if (requiereEmpresa)
+                        {
+                            <div class="mb-3 fade-in">
+                                <label class="fw-semibold small text-muted">Asignar a Empresa Cliente</label>
+                                <InputSelect class="form-select border-primary" @bind-Value="usuarioForm.EmpresaId">
+                                    <option value="">-- Seleccione la Empresa --</option>
+                                    @foreach (var emp in listaEmpresas)
+                                    {
+                                        <option value="@emp.Id">@emp.Nombre</option>
+                                    }
+                                </InputSelect>
+                            </div>
+                        }
+                        else if (usuarioForm.RolId != 0)
+                        {
+                            <div class="alert alert-info py-2 small mb-3">
+                                <i class="bi bi-info-circle me-1"></i> Este usuario pertenece internamente a Tecnoware Solutions.
+                            </div>
+                        }
+
+                        @if (isEditing)
+                        {
+                            <div class="form-check form-switch mb-4">
+                                <InputCheckbox class="form-check-input" @bind-Value="usuarioForm.Activo" id="chkActivo" />
+                                <label class="form-check-label fw-bold @(usuarioForm.Activo ? "text-success" : "text-danger")" for="chkActivo">
+                                    @(usuarioForm.Activo ? "Usuario Activo (Con acceso)" : "Usuario Suspendido")
+                                </label>
+                            </div>
+                        }
+
+                        <button type="submit" class="btn btn-success w-100 fw-bold shadow-sm">
+                            <i class="bi bi-save me-1"></i> @(isEditing ? "Actualizar Datos" : "Crear Usuario")
+                        </button>
+                        
+                        @if (isEditing)
+                        {
+                            <button type="button" class="btn btn-outline-secondary w-100 mt-2" @onclick="CancelarEdicion">Cancelar</button>
+                        }
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+
+        <!-- TABLA DE LISTADO -->
+        <div class="col-md-8">
+            <div class="card shadow-sm border-0">
+                <div class="card-body p-0">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th class="py-3 px-3">Nombre</th>
+                                <th>Rol / Perfil</th>
+                                <th>Empresa Asignada</th>
+                                <th>Estado</th>
+                                <th class="text-end px-3">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var u in listaUsuarios)
+                            {
+                                <tr>
+                                    <td class="px-3">
+                                        <div class="fw-bold text-dark">@u.NombreCompleto</div>
+                                        <div class="small text-muted">@u.Correo</div>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">@u.RolNombre</span>
+                                    </td>
+                                    <td>@(u.EmpresaNombre)</td>
+                                    <td>
+                                        @if (u.Activo)
+                                        {
+                                            <span class="badge bg-success bg-opacity-10 text-success border border-success">Activo</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-danger bg-opacity-10 text-danger border border-danger">Suspendido</span>
+                                        }
+                                    </td>
+                                    <td class="text-end px-3">
+                                        <button class="btn btn-sm btn-light text-primary border shadow-sm" @onclick="() => CargarUsuario(u)">
+                                            <i class="bi bi-pencil-square"></i> Editar
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                            @if (!listaUsuarios.Any())
+                            {
+                                <tr>
+                                    <td colspan="5" class="text-center py-5 text-muted">No hay usuarios registrados o cargando...</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<UsuarioDto> listaUsuarios = new();
+    
+    // Registros locales para manejar las listas de selectores fácilmente
+    public record RolItem(int Id, string Nombre);
+    public record EmpresaItem(int Id, string Nombre);
+    private List<RolItem> listaRoles = new(); 
+    private List<EmpresaItem> listaEmpresas = new();
+
+    private UsuarioEditarDto usuarioForm = new() { Activo = true };
+    private string passwordTemporal = "";
+    private bool isEditing = false;
+    private bool requiereEmpresa = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarListas();
+    }
+
+    private async Task CargarListas()
+    {
+        listaUsuarios = await UsuariosService.GetUsuarios();
+        
+        listaRoles = await Http.GetFromJsonAsync<List<RolItem>>("api/roles") ?? new();
+        listaEmpresas = await Http.GetFromJsonAsync<List<EmpresaItem>>("api/empresas") ?? new();
+    }
+
+ private void VerificarRol()
+    {
+        // Buscamos el nombre del rol seleccionado en la lista que trajimos de la API
+        var rolSeleccionado = listaRoles.FirstOrDefault(r => r.Id == usuarioForm.RolId);
+        
+        // Mostrará el selector de empresa para cualquier rol que NO sea Administrador
+        requiereEmpresa = rolSeleccionado != null && !rolSeleccionado.Nombre.Contains("Admin", StringComparison.OrdinalIgnoreCase);
+        
+        if (!requiereEmpresa)
+        {
+            usuarioForm.EmpresaId = null; // Fuerza valor nulo si es un Administrador interno
+        }
+    }
+
+    private void CargarUsuario(UsuarioDto u)
+    {
+        isEditing = true;
+        passwordTemporal = "";
+        usuarioForm = new UsuarioEditarDto
+        {
+            Id = u.Id,
+            NombreCompleto = u.NombreCompleto,
+            Correo = u.Correo,
+            RolId = u.RolId,
+            EmpresaId = u.EmpresaId,
+            Activo = u.Activo
+        };
+        VerificarRol();
+    }
+
+    private void CancelarEdicion()
+    {
+        isEditing = false;
+        passwordTemporal = "";
+        usuarioForm = new UsuarioEditarDto() { Activo = true };
+        requiereEmpresa = false;
+    }
+
+    private async Task GuardarUsuario()
+    {
+        if (isEditing)
+        {
+            usuarioForm.Password = passwordTemporal;
+            await UsuariosService.Editar(usuarioForm);
+        }
+        else
+        {
+            var crearDto = new UsuarioCrearDto
+            {
+                NombreCompleto = usuarioForm.NombreCompleto,
+                Correo = usuarioForm.Correo,
+                Password = passwordTemporal,
+                RolId = usuarioForm.RolId,
+                EmpresaId = usuarioForm.EmpresaId
+            };
+            await UsuariosService.Crear(crearDto);
+        }
+
+        await CargarListas();
+        CancelarEdicion();
+    }
+}

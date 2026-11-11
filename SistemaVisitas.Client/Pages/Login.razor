@@ -1,0 +1,265 @@
+﻿@page "/login"
+@layout Layout.LoginLayout
+@using SistemaVisitas.Shared.DTOs
+@using System.Text.Json
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Iniciar Sesión - Tecnoware Visitas</PageTitle>
+
+<style>
+    /* Estilos exclusivos para este Login */
+    .role-card {
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        border: 2px solid transparent;
+        background-color: #ffffff;
+    }
+    .role-card:hover {
+        transform: translateY(-8px);
+        border-color: #0d6efd;
+        box-shadow: 0 15px 30px rgba(13, 110, 253, 0.15) !important;
+    }
+    .role-icon {
+        font-size: 3.5rem;
+        margin-bottom: 1rem;
+        color: #0d6efd;
+    }
+    .back-btn {
+        cursor: pointer;
+        color: #6c757d;
+        transition: 0.2s;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .back-btn:hover {
+        color: #0d6efd;
+    }
+    .fade-in-up {
+        animation: fadeInUp 0.4s ease-out;
+    }
+    @@keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
+
+<div class="container fade-in-up">
+    <div class="text-center mb-5">
+        <h1 class="text-white fw-bold display-5 mb-2"><i class="bi bi-shield-lock-fill me-3"></i>Tecnoware Visitas</h1>
+        <p class="text-white-50 fs-5">Plataforma de Gestión de Activos y Mantenimiento</p>
+    </div>
+
+    @if (pasoActual == 1)
+    {
+        <!-- ========================================== -->
+        <!-- PASO 1: SELECCIÓN DE PORTAL                -->
+        <!-- ========================================== -->
+        <div class="row justify-content-center g-4 max-w-4xl mx-auto">
+            <div class="col-md-4">
+                <div class="card role-card shadow border-0 rounded-4 h-100 p-4 text-center" @onclick='() => SeleccionarRol("Admin")'>
+                    <div class="card-body">
+                        <i class="bi bi-person-workspace role-icon text-dark"></i>
+                        <h4 class="fw-bold mb-2">Administrador</h4>
+                        <p class="text-muted small mb-0">Control total del sistema, usuarios y plantillas.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card role-card shadow border-0 rounded-4 h-100 p-4 text-center" @onclick='() => SeleccionarRol("Trabajador")'>
+                    <div class="card-body">
+                        <i class="bi bi-tools role-icon text-primary"></i>
+                        <h4 class="fw-bold mb-2">Técnico</h4>
+                        <p class="text-muted small mb-0">Ejecución de visitas y revisión de inventario.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card role-card shadow border-0 rounded-4 h-100 p-4 text-center" @onclick='() => SeleccionarRol("Empresa")'>
+                    <div class="card-body">
+                        <i class="bi bi-building role-icon text-success"></i>
+                        <h4 class="fw-bold mb-2">Cliente</h4>
+                        <p class="text-muted small mb-0">Consulta de equipos y actas de servicio.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+    else if (pasoActual == 2)
+    {
+        <!-- ========================================== -->
+        <!-- PASO 2: CREDENCIALES (FORMULARIO)          -->
+        <!-- ========================================== -->
+        <div class="card shadow-lg border-0 rounded-4 mx-auto fade-in-up overflow-hidden" style="max-width: 450px;">
+            <!-- Cabecera dinámica según el rol -->
+            <div class="bg-light p-4 border-bottom text-center position-relative">
+                <a class="position-absolute top-50 start-0 translate-middle-y ms-4 back-btn" @onclick="VolverAtras">
+                    <i class="bi bi-arrow-left me-1"></i>Volver
+                </a>
+                <h5 class="fw-bold text-dark mb-0 ms-4">
+                    Portal <span class="text-primary">@ObtenerNombreVisualRol(rolSeleccionado)</span>
+                </h5>
+            </div>
+
+            <div class="card-body p-5">
+                @if (!string.IsNullOrEmpty(mensajeError))
+                {
+                    <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center rounded-3 p-3 mb-4">
+                        <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
+                        <div class="small fw-semibold">@mensajeError</div>
+                    </div>
+                }
+
+                <EditForm Model="loginModel" OnValidSubmit="IniciarSesion">
+                    <DataAnnotationsValidator />
+
+                    <div class="form-floating mb-3">
+                        <InputText type="email" class="form-control fw-semibold" id="correo" placeholder="name@example.com" @bind-Value="loginModel.Correo" />
+                        <label for="correo"><i class="bi bi-envelope me-2"></i>Correo Electrónico</label>
+                    </div>
+
+                    <div class="form-floating mb-4">
+                        <InputText type="password" class="form-control fw-semibold" id="password" placeholder="Password" @bind-Value="loginModel.Password" />
+                        <label for="password"><i class="bi bi-key me-2"></i>Contraseña</label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg w-100 fw-bold shadow-sm rounded-3 py-3" disabled="@isLoading">
+                        @if (isLoading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span> <span>Verificando...</span>
+                        }
+                        else
+                        {
+                            <span>Ingresar al Sistema</span>
+                        }
+                    </button>
+                </EditForm>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private int pasoActual = 1;
+    private string rolSeleccionado = "";
+    
+    // IMPORTANTE: Asegúrate de que esta clase exista en tu proyecto o cámbiala por la tuya.
+    public class LoginRequest { public string Correo { get; set; } = ""; public string Password { get; set; } = ""; }
+    private LoginRequest loginModel = new();
+    
+    private bool isLoading = false;
+    private string? mensajeError;
+
+    // Clases auxiliares para leer la respuesta de la API
+    public class LoginResponse { public string Token { get; set; } = ""; }
+
+    private void SeleccionarRol(string rol)
+    {
+        rolSeleccionado = rol;
+        pasoActual = 2;
+        mensajeError = null;
+        loginModel = new LoginRequest();
+    }
+
+    private void VolverAtras()
+    {
+        pasoActual = 1;
+        mensajeError = null;
+    }
+
+    private string ObtenerNombreVisualRol(string rol)
+    {
+        return rol switch
+        {
+            "Admin" => "Administrador",
+            "Trabajador" => "Técnico",
+            "Empresa" => "Cliente",
+            _ => rol
+        };
+    }
+
+    private async Task IniciarSesion()
+    {
+        isLoading = true;
+        mensajeError = null;
+
+        try
+        {
+            // Ajusta "api/Auth/Login" a la URL real de tu backend
+            var response = await Http.PostAsJsonAsync("api/Auth/Login", loginModel);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<LoginResponse>();
+                string token = result?.Token ?? "";
+
+                // 1. Extraemos el rol del token (Sin guardarlo aún en el navegador)
+                string rolReal = ExtraerRolDelToken(token);
+
+                // 2. LA MAGIA: Validar que el rol coincida con el portal elegido
+                if (!string.Equals(rolReal, rolSeleccionado, StringComparison.OrdinalIgnoreCase))
+                {
+                    mensajeError = $"Acceso denegado. Eres '{ObtenerNombreVisualRol(rolReal)}' y estás intentando entrar al portal de '{ObtenerNombreVisualRol(rolSeleccionado)}'.";
+                    isLoading = false;
+                    return;
+                }
+
+                // 3. Todo coincide: Guardamos sesión de forma segura
+                await JS.InvokeVoidAsync("localStorage.setItem", "authToken", token);
+                
+                // Forzamos la recarga para que el AuthStateProvider de Blazor lea el nuevo token del localStorage y construya el NavMenu
+                Navigation.NavigateTo("/", forceLoad: true);
+            }
+            else
+            {
+                mensajeError = "Correo electrónico o contraseña incorrectos.";
+            }
+        }
+        catch (Exception)
+        {
+            mensajeError = "No se pudo conectar con el servidor. Verifica tu conexión.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    // Método a prueba de balas para decodificar un JWT en Blazor sin librerías pesadas
+    private string ExtraerRolDelToken(string token)
+    {
+        try
+        {
+            var payloadStr = token.Split('.')[1];
+            
+            // Arreglamos el padding del Base64 si es necesario
+            switch (payloadStr.Length % 4)
+            {
+                case 2: payloadStr += "=="; break;
+                case 3: payloadStr += "="; break;
+            }
+            
+            var jsonBytes = Convert.FromBase64String(payloadStr);
+            var json = System.Text.Encoding.UTF8.GetString(jsonBytes);
+            var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+            
+            if (dict == null) return "";
+
+            // Buscamos el claim que contiene "role" (varía según cómo lo envía tu API de .NET)
+            var roleKey = dict.Keys.FirstOrDefault(k => k.ToLower().Contains("role"));
+            if (roleKey != null)
+            {
+                return dict[roleKey].ToString();
+            }
+            
+            return "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+}

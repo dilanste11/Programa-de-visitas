@@ -1,0 +1,191 @@
+﻿@page "/asignar-visita"
+@using Microsoft.AspNetCore.Authorization
+@using SistemaVisitas.Shared.DTOs
+@using SistemaVisitas.Client.Services
+@attribute [Authorize(Roles = "Admin")]
+
+@inject EmpresasService EmpresaService
+@inject UsuariosService UsuarioService
+@inject HojasVisitaService VisitaService
+
+<PageTitle>Agendar Visita - Tecnoware Visitas</PageTitle>
+
+<div class="container mt-5 mb-5 fade-in" style="max-width: 900px;">
+
+    @if (!string.IsNullOrEmpty(mensajeAlerta))
+    {
+        <div class="alert alert-@tipoAlerta shadow-sm mb-4 d-flex align-items-center rounded-3">
+            <i class="bi bi-info-circle-fill me-3 fs-4"></i>
+            <div>@mensajeAlerta</div>
+        </div>
+    }
+
+    <div class="card shadow-lg border-0 rounded-4 overflow-hidden">
+        <div class="card-header bg-white border-bottom p-4 px-5">
+            <h3 class="fw-bold text-primary mb-1">
+                <i class="bi bi-calendar-plus-fill me-2"></i>Agendar Nueva Visita
+            </h3>
+            <p class="text-muted mb-0 small">Asigna un técnico a una empresa y programa la fecha de la visita.</p>
+        </div>
+
+        <div class="card-body p-4 px-5 bg-light">
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+                    <p class="text-muted mt-3 fw-bold">Cargando datos del sistema...</p>
+                </div>
+            }
+            else
+            {
+                <EditForm Model="nuevaAsignacion" OnValidSubmit="GuardarAsignacion">
+                    <DataAnnotationsValidator />
+
+                    <div class="row g-4">
+                        <!-- 1. Cliente -->
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label fw-bold text-dark small text-uppercase mb-2">
+                                    <i class="bi bi-building me-2"></i>1. Seleccionar Cliente *
+                                </label>
+                                <select class="form-select form-select-lg border-0 shadow-sm rounded-3" @bind="nuevaAsignacion.EmpresaId">
+                                    <option value="0">-- Seleccionar Empresa --</option>
+                                    @foreach (var emp in empresas)
+                                    {
+                                        <option value="@emp.Id">@emp.Nombre</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 2. Técnico -->
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label fw-bold text-dark small text-uppercase mb-2">
+                                    <i class="bi bi-person-badge me-2"></i>2. Asignar a Técnico *
+                                </label>
+                                <select class="form-select form-select-lg border-0 shadow-sm rounded-3" @bind="nuevaAsignacion.TrabajadorId">
+                                    <option value="0">-- Seleccionar Técnico --</option>
+                                    @foreach (var tec in tecnicos)
+                                    {
+                                        <option value="@tec.Id">@tec.NombreCompleto</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 3. Fecha y Hora -->
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label fw-bold text-dark small text-uppercase mb-2">
+                                    <i class="bi bi-clock-history me-2"></i>3. Fecha y Hora Programada *
+                                </label>
+                                <!-- Usamos InputDate de Blazor que maneja la conversión perfecta -->
+                                <InputDate Type="InputDateType.DateTimeLocal"
+                                           class="form-control form-control-lg border-0 shadow-sm rounded-3"
+                                           @bind-Value="nuevaAsignacion.FechaProgramada" />
+                            </div>
+                        </div>
+
+                        <!-- 4. Notas del Admin -->
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label class="form-label fw-bold text-dark small text-uppercase mb-2">
+                                    <i class="bi bi-card-text me-2"></i>4. Instrucciones o Notas
+                                </label>
+                                <textarea class="form-control border-0 shadow-sm rounded-3" rows="2" placeholder="Ej: Revisar servidor principal, llevar repuestos..." @bind="nuevaAsignacion.NotasAdmin"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-5 text-muted" />
+
+                    <div class="d-flex justify-content-end">
+                        <button type="submit" class="btn btn-primary btn-lg fw-bold shadow-sm rounded-pill px-5" disabled="@isSubmitting">
+                            @if (isSubmitting)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span> <span>Procesando...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-send-check-fill me-2"></i> <span>Confirmar Asignación</span>
+                            }
+                        </button>
+                    </div>
+                </EditForm>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    // Le asignamos DateTime.Now justo al crear el objeto
+    private CrearAsignacionDto nuevaAsignacion = new() { FechaProgramada = DateTime.Now };
+    private List<EmpresaDto> empresas = new();
+    private List<UsuarioDto> tecnicos = new();
+
+    private bool isLoading = true;
+    private bool isSubmitting = false;
+    private string? mensajeAlerta;
+    private string tipoAlerta = "success";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            isLoading = true;
+
+            empresas = await EmpresaService.GetEmpresasAsync();
+
+            tecnicos = await UsuarioService.GetTecnicosAsync();
+        }
+        catch (Exception)
+        {
+            tipoAlerta = "danger";
+            mensajeAlerta = "Hubo un problema al cargar la lista de empresas y técnicos.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task GuardarAsignacion()
+    {
+        if (nuevaAsignacion.EmpresaId == 0 || nuevaAsignacion.TrabajadorId == 0)
+        {
+            tipoAlerta = "warning";
+            mensajeAlerta = "Debes seleccionar un cliente y un técnico obligatoriamente.";
+            return;
+        }
+
+        isSubmitting = true;
+        mensajeAlerta = null;
+
+        try
+        {
+            var response = await VisitaService.AsignarVisitaAsync(nuevaAsignacion);
+
+            if (response.IsSuccessStatusCode)
+            {
+                tipoAlerta = "success";
+                mensajeAlerta = "¡La visita ha sido agendada correctamente! El técnico ya puede verla en su panel principal.";
+                nuevaAsignacion = new() { FechaProgramada = DateTime.Now };
+            }
+            else
+            {
+                tipoAlerta = "danger";
+                mensajeAlerta = "Hubo un error al guardar la asignación. Intenta nuevamente.";
+            }
+        }
+        catch (Exception ex)
+        {
+            tipoAlerta = "danger";
+            mensajeAlerta = $"Error de conexión: {ex.Message}";
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+}

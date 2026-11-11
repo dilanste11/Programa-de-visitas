@@ -1,0 +1,473 @@
+﻿@page "/ejecutar-visita"
+@page "/ejecutar-visita/{AsignacionId:int}"
+@using SistemaVisitas.Client.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using SistemaVisitas.Shared.DTOs
+@inject HojasVisitaService VisitaService
+@inject PlantillasVisitaService PlantillaService
+@inject EmpresasService EmpresaService
+@inject DispositivosService DispositivoService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@inject HttpClient Http
+
+<PageTitle>Ejecución de Visita</PageTitle>
+
+<div class="container mt-4 mb-5">
+    <h3 class="fw-bold text-primary"><i class="bi bi-clipboard-check me-2"></i>Ejecución de Visita Técnica</h3>
+
+    @if (isSaving)
+    {
+        <div class="alert alert-info shadow-sm mt-3"><span class="spinner-border spinner-border-sm me-2"></span> Guardando visita de forma segura...</div>
+    }
+    @if (!string.IsNullOrEmpty(mensajeAlerta))
+    {
+        <div class="alert alert-@tipoAlerta shadow-sm mt-3">@mensajeAlerta</div>
+    }
+
+    <!-- BLOQUE 1: Carga de Plantilla -->
+    <div class="card shadow-sm mb-4 mt-3 border-0 bg-light">
+        <div class="card-body">
+            <div class="row align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold text-muted">1. Selecciona el Cliente:</label>                    
+                    <select class="form-select border-primary shadow-sm" value="@visitaActual.EmpresaId" @onchange="OnEmpresaSeleccionada">
+                        <option value="0">-- Seleccionar Empresa --</option>
+                        @foreach (var emp in empresasDisponibles)
+                        {
+                            <option value="@emp.Id">@emp.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label fw-bold text-muted">2. Selecciona la Plantilla:</label>
+                    <select class="form-select border-primary shadow-sm" @bind="idPlantillaSeleccionada">
+                        <option value="0">-- Elegir plantilla --</option>
+                        @foreach (var p in plantillasDisponibles)
+                        {
+                            <option value="@p.Id">@p.Nombre @(p.Codigo != null ? $"({p.Codigo})" : "")</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary fw-bold shadow-sm w-100" @onclick="CargarPlantilla" disabled="@isLoading">
+                        <i class="bi bi-file-earmark-arrow-down me-2"></i> Cargar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (dispositivosEmpresa.Any())
+    {
+        <div class="mb-4 p-3 bg-light border rounded shadow-sm">
+            <label class="form-label fw-bold text-primary-dark mb-3">
+                <i class="bi bi-pc-display me-2"></i>Equipos a Revisar
+            </label>
+
+            @if (!equiposParaRevisar.Any())
+            {
+                <div class="alert alert-warning small py-2">
+                    <i class="bi bi-info-circle me-1"></i> Selecciona primero una empresa para ver sus equipos.
+                </div>
+            }
+            else
+            {
+                <div class="row g-2">
+                    @foreach (var eq in equiposParaRevisar)
+                    {
+                        <div class="col-md-12">
+                            <div class="card border-0 shadow-sm @(eq.Seleccionado ? "border-start border-primary border-3" : "")">
+                                <div class="card-body p-2 px-3">
+                                    <div class="form-check form-switch d-flex align-items-center mb-0">
+                                        <input class="form-check-input me-3" style="cursor: pointer; transform: scale(1.2);" 
+                                               type="checkbox" 
+                                               id="eq_@eq.DispositivoId" 
+                                               @bind="eq.Seleccionado" />
+                                        <label class="form-check-label fw-semibold" for="eq_@eq.DispositivoId" style="cursor: pointer;">
+                                            @eq.NombreMostrar
+                                        </label>
+                                    </div>
+                                    @if (eq.Seleccionado)
+                                    {
+                                        <div class="mt-2 ms-5 fade-in">
+                                            <textarea class="form-control form-control-sm border-primary text-muted" 
+                                                      rows="2" 
+                                                      placeholder="Escribe la observación, estado o intervención realizada en este equipo..."
+                                                      @bind="eq.Observacion"></textarea>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (plantillaCargada != null)
+    {
+        <EditForm Model="visitaActual" OnValidSubmit="FinalizarVisita">
+            <DataAnnotationsValidator />
+
+            <!-- BLOQUE 2: Respuestas Dinámicas -->
+            <div class="card shadow-sm mb-4 border-top border-primary border-4">
+                <div class="card-header bg-white p-3">
+                    <h5 class="mb-0 fw-bold">Revisión: @plantillaCargada.Nombre</h5>
+                </div>
+                <div class="card-body">
+                    @foreach (var seccion in plantillaCargada.Detalles.OrderBy(d => d.Orden))
+                    {
+                        <div class="mb-4 p-3 border rounded bg-light">
+                            <h6 class="fw-bold text-uppercase text-secondary border-bottom pb-2">@seccion.TituloSeccion</h6>
+                            
+                            @foreach (var item in seccion.Items.OrderBy(i => i.Orden))
+                            {
+                                var respuestaAsociada = visitaActual.Respuestas.First(r => r.PlantillaDetalleItemId == item.Id);
+
+                                <div class="row mb-3 align-items-center">
+                                    <div class="col-md-6">
+                                        <label class="form-label mb-0 fw-semibold">
+                                            @item.NombreItem 
+                                            @if (item.EsObligatorio) { <span class="text-danger">*</span> }
+                                        </label>
+                                    </div>
+                                    <div class="col-md-6">
+                                        @if (item.TipoCampo == "Booleano")
+                                        {
+                                            <select class="form-select" @bind="respuestaAsociada.ValorRespuesta">
+                                                <option value="">-- Selecciona --</option>
+                                                <option value="True">Sí / Cumple</option>
+                                                <option value="False">No / No Cumple</option>
+                                            </select>
+                                        }
+                                        else if (item.TipoCampo == "Imagen" || item.TipoCampo == "Evidencia")
+                                        {
+                                            <InputFile accept="image/*" capture="environment" 
+                                                       OnChange="@(e => SubirEvidenciaActiva(e, respuestaAsociada))" 
+                                                       class="form-control border-primary" />
+                                            
+                                            @if (!string.IsNullOrEmpty(respuestaAsociada.ValorRespuesta))
+                                            {
+                                                <div class="mt-2 text-center position-relative d-inline-block">
+                                                    <img src="@respuestaAsociada.ValorRespuesta" alt="Evidencia" class="img-thumbnail shadow-sm" style="max-height: 150px;" />
+                                                    <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" style="transform: translate(25%, -25%); border-radius: 50%;" 
+                                                            @onclick="() => respuestaAsociada.ValorRespuesta = null">
+                                                        <i class="bi bi-x"></i>
+                                                    </button>
+                                                </div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <input type="text" class="form-control" @bind="respuestaAsociada.ValorRespuesta" placeholder="Escribe tu respuesta..." />
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- BLOQUE 3: Firma y Aceptación -->
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-body p-4 bg-light rounded">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-pen me-2"></i>Firma del Cliente</h5>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small">Nombre de quien recibe *</label>
+                            <InputText class="form-control" @bind-Value="visitaActual.NombreQuienRecibe" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small">Cargo en la empresa</label>
+                            <InputText class="form-control" @bind-Value="visitaActual.CargoQuienRecibe" placeholder="Ej: Gerente, Sistemas..." />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small">Documento / Cédula</label>
+                            <InputText class="form-control" @bind-Value="visitaActual.DocumentoQuienRecibe" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small">Correo para enviar acta</label>
+                            <input type="email" class="form-control" @bind="visitaActual.CorreoEnviado" placeholder="cliente@empresa.com" />
+                        </div>
+                        <div class="col-12 mt-4 text-center">
+                            <label class="form-label fw-bold">Por favor firme en el recuadro inferior:</label>
+                            <div class="border border-dark bg-white d-inline-block shadow-sm" style="border-radius: 8px; overflow: hidden;">
+                                <canvas id="signatureCanvas" width="500" height="200" style="touch-action: none;"></canvas>
+                            </div>
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="LimpiarFirma">Borrar Firma</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-lg btn-success w-100 fw-bold shadow-sm mb-5" disabled="@isSaving">
+                <i class="bi bi-check-circle me-2"></i> Guardar Visita y Generar Acta
+            </button>
+        </EditForm>
+    }
+</div>
+
+@code {
+
+    public class EquipoSeleccionable
+    {
+        public int DispositivoId { get; set; }
+        public string NombreMostrar { get; set; } = "";
+        public bool Seleccionado { get; set; } = false;
+        public string Observacion { get; set; } = "";
+    }
+
+    private List<EquipoSeleccionable> equiposParaRevisar = new();
+    private EjecucionVisitaDto visitaActual = new();
+    private PlantillaVisitaDto? plantillaCargada;
+    private List<EmpresaDto> empresasDisponibles = new();
+    private int idPlantillaSeleccionada = 0;
+    private int idTrabajadorAutenticado = 0;
+    private List<DispositivoDto> dispositivosEmpresa = new();
+    private List<PlantillaVisitaDto> plantillasDisponibles = new();
+    
+    private bool isLoading = false;
+    private bool isSaving = false;
+    private string? mensajeAlerta;
+    private string tipoAlerta = "danger";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity is not null && user.Identity.IsAuthenticated)
+            {
+                var claimId = user.FindFirst(ClaimTypes.NameIdentifier) ?? user.FindFirst("id") ?? user.FindFirst("Id");
+                
+                if (claimId != null && int.TryParse(claimId.Value, out int idParseado))
+                {
+                    idTrabajadorAutenticado = idParseado;
+                }
+            }
+            plantillasDisponibles = await PlantillaService.GetPlantillasAsync();
+            plantillasDisponibles = plantillasDisponibles.Where(p => p.Activa).ToList();
+            empresasDisponibles = await EmpresaService.GetEmpresasAsync();
+        }
+        catch
+        {
+            tipoAlerta = "danger";
+            mensajeAlerta = "Error al conectar con el servidor para cargar las plantillas.";
+        }
+    }
+
+    private async Task OnEmpresaSeleccionada(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int idEmpresa) && idEmpresa > 0)
+        {
+            visitaActual.EmpresaId = idEmpresa;
+            
+            isLoading = true;
+            dispositivosEmpresa = await DispositivoService.GetPorEmpresaAsync(idEmpresa);
+            
+            equiposParaRevisar = dispositivosEmpresa.Select(d => new EquipoSeleccionable
+            {
+                DispositivoId = d.Id,
+                NombreMostrar = d.Nombre ?? $"Equipo #{d.Id}"
+            }).ToList();
+            
+            isLoading = false;
+        }
+        else
+        {
+            visitaActual.EmpresaId = 0;
+            dispositivosEmpresa.Clear();
+            equiposParaRevisar.Clear();
+        }
+    }
+
+    private async Task SubirEvidenciaActiva(InputFileChangeEventArgs e, VisitaRespuestaDto respuestaAsociada)
+    {
+        try
+        {
+            isLoading = true; 
+            mensajeAlerta = null;
+
+            var archivo = e.File;
+            long maxAllowedSize = 10 * 1024 * 1024; 
+
+            using var content = new MultipartFormDataContent();
+            var fileContent = new StreamContent(archivo.OpenReadStream(maxAllowedSize));
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(archivo.ContentType);
+            
+            content.Add(fileContent, "archivo", archivo.Name);
+
+            var response = await Http.PostAsync("api/Evidencias/SubirFoto", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var resultado = await response.Content.ReadFromJsonAsync<RespuestaEvidenciaDto>();
+                if (resultado != null)
+                {
+                    respuestaAsociada.ValorRespuesta = resultado.Url;
+                }
+            }
+            else
+            {
+                tipoAlerta = "danger";
+                mensajeAlerta = "Error al subir la evidencia a la nube.";
+            }
+        }
+        catch (Exception ex)
+        {
+            tipoAlerta = "danger";
+            mensajeAlerta = $"Error procesando la imagen: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+    
+    private class RespuestaEvidenciaDto { public string Url { get; set; } = string.Empty; }
+
+    private async Task CargarPlantilla()
+    {
+        if (visitaActual.EmpresaId == 0)
+        {
+            tipoAlerta = "warning";
+            mensajeAlerta = "Por favor, selecciona a qué cliente (Empresa) le harás la visita.";
+            return;
+        }
+        if (idPlantillaSeleccionada == 0)
+        {
+            tipoAlerta = "warning";
+            mensajeAlerta = "Por favor, selecciona una plantilla de la lista antes de cargar el formulario.";
+            return;
+        }
+
+        isLoading = true;
+        mensajeAlerta = null;
+        
+        try
+        {
+            plantillaCargada = await PlantillaService.GetPlantillaCompletaAsync(idPlantillaSeleccionada);
+            
+            if (plantillaCargada != null)
+            {
+                var empresaIdSeleccionada = visitaActual.EmpresaId;
+                visitaActual = new EjecucionVisitaDto
+                {
+                    PlantillaVisitaId = plantillaCargada.Id,
+                    EmpresaId = empresaIdSeleccionada,
+                    TrabajadorId = idTrabajadorAutenticado,
+                    FechaInicio = DateTime.Now
+                };
+
+                foreach (var seccion in plantillaCargada.Detalles)
+                {
+                    foreach (var item in seccion.Items)
+                    {
+                        visitaActual.Respuestas.Add(new VisitaRespuestaDto
+                        {
+                            PlantillaDetalleItemId = item.Id,
+                            EsObligatorio = item.EsObligatorio
+                        });
+                    }
+                }
+                StateHasChanged(); 
+                await Task.Delay(150); 
+                
+                await JS.InvokeVoidAsync("signaturePad.init", "signatureCanvas");
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            tipoAlerta = "danger";
+            mensajeAlerta = "No tienes autorización. Por favor, inicia sesión para continuar.";
+            plantillaCargada = null;
+        }
+        catch (Exception ex)
+        {
+            tipoAlerta = "danger";
+            mensajeAlerta = $"Error de conexión: {ex.Message}";
+            plantillaCargada = null;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LimpiarFirma()
+    {
+        await JS.InvokeVoidAsync("signaturePad.clear", "signatureCanvas");
+    }
+
+    private async Task FinalizarVisita()
+    {
+        visitaActual.FechaFin = DateTime.Now;
+        isSaving = true;
+        mensajeAlerta = null;
+
+        // Se usa VisitaDispositivoDto como espera tu backend
+        visitaActual.EquiposRevisados = equiposParaRevisar
+            .Where(e => e.Seleccionado)
+            .Select(e => new VisitaDispositivoDto
+            {
+                DispositivoId = e.DispositivoId,
+                ObservacionEquipo = e.Observacion
+            }).ToList();
+
+        if (!visitaActual.EquiposRevisados.Any())
+        {
+            tipoAlerta = "warning";
+            mensajeAlerta = "Debes seleccionar y añadir una observación a por lo menos un equipo de la empresa.";
+            isSaving = false;
+            return;
+        }
+
+        var firmaBase64 = await JS.InvokeAsync<string>("signaturePad.getData", "signatureCanvas");
+        
+        if (string.IsNullOrEmpty(firmaBase64) || firmaBase64.Length < 1000)
+        {
+            tipoAlerta = "warning";
+            mensajeAlerta = "El cliente debe firmar el documento para continuar.";
+            isSaving = false;
+            return;
+        }
+        visitaActual.FirmaClienteBase64 = firmaBase64;
+
+        foreach (var resp in visitaActual.Respuestas)
+        {
+            if (resp.EsObligatorio && string.IsNullOrWhiteSpace(resp.ValorRespuesta))
+            {
+                tipoAlerta = "danger";
+                mensajeAlerta = "Faltan preguntas obligatorias por responder en el formulario.";
+                isSaving = false;
+                return;
+            }
+        }
+
+        var response = await VisitaService.EjecutarVisitaAsync(visitaActual);
+        
+        if (response.IsSuccessStatusCode)
+        {
+            tipoAlerta = "success";
+            mensajeAlerta = "Visita ejecutada, guardada y firmada con éxito. ¡Transacción completa!";
+            
+            plantillaCargada = null; 
+            equiposParaRevisar.Clear(); 
+        }
+        else
+        {
+            tipoAlerta = "danger";
+            mensajeAlerta = $"Error del servidor: {await response.Content.ReadAsStringAsync()}";
+        }
+        
+        isSaving = false;
+    }
+}
